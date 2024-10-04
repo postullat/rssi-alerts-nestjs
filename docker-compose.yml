@@ -1,0 +1,70 @@
+version: '3'
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.2.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.2.1
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      # Configure the advertised listeners for both Docker network and external access
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,PLAINTEXT_HOST://0.0.0.0:9093
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+    depends_on:
+      - zookeeper
+
+  kafka-topics-creator:
+    image: confluentinc/cp-kafka:7.2.1
+    depends_on:
+      - kafka
+    entrypoint: |
+      bash -c "
+      /usr/bin/kafka-topics --create --topic rssi-topic --partitions 1 --replication-factor 1 --if-not-exists --bootstrap-server kafka:9092 &&
+      /usr/bin/kafka-topics --create --topic alert-topic --partitions 1 --replication-factor 1 --if-not-exists --bootstrap-server kafka:9092
+      "
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: "local-cluster"
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: "kafka:9092"
+    depends_on:
+      - kafka
+
+  device-api:
+    build:
+      context: ./device-api
+      dockerfile: Dockerfile
+    container_name: device-api
+    ports:
+      - '4000:4000'
+    depends_on:
+      - kafka-topics-creator
+
+  rssi-monitor:
+    build:
+      context: ./rssi-monitor
+      dockerfile: Dockerfile
+    container_name: rssi-monitor
+    ports:
+      - '4001:4001'
+    depends_on:
+      - kafka-topics-creator
+
+networks:
+  default:
+    driver: bridge
